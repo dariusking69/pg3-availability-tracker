@@ -1,0 +1,5 @@
+config.yaml
+google_credentials.json
+.env
+__pycache__/
+*.log
