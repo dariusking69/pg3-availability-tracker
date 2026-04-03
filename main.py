@@ -20,6 +20,23 @@ VACANCY_STATUSES = {
 
 SECTION_ORDER = ["Vacant-Unrented", "Vacant-Rented", "Notice-Unrented"]
 
+# Column H (NEED TO POST) dropdown options and colors
+NEED_TO_POST_OPTIONS = ["Turn In Progress", "Need To Post", "Posted"]
+NEED_TO_POST_COLORS = {
+    "Turn In Progress": {
+        "bg": {"red": 1.0,   "green": 0.898, "blue": 0.2},
+        "fg": {"red": 0.0,   "green": 0.0,   "blue": 0.0},
+    },
+    "Need To Post": {
+        "bg": {"red": 0.918, "green": 0.259, "blue": 0.208},
+        "fg": {"red": 1.0,   "green": 1.0,   "blue": 1.0},
+    },
+    "Posted": {
+        "bg": {"red": 0.204, "green": 0.659, "blue": 0.325},
+        "fg": {"red": 1.0,   "green": 1.0,   "blue": 1.0},
+    },
+}
+
 
 # ==========================================================================
 # Helpers (patterns from WAPR main.py)
@@ -470,6 +487,87 @@ def write_to_sheet(worksheet, output_rows):
     print(f"Wrote {len(output_rows)} rows to sheet.")
 
 
+def apply_need_to_post_chips(worksheet, sections, output_rows):
+    """Apply dropdown + background colors to column H for Vacant-Unrented rows only."""
+    H_COL = 7  # 0-indexed
+    sheet_id = worksheet.id
+    vu_count = len(sections["Vacant-Unrented"])
+
+    # output_rows layout: [0]=headers, [1]=VU section header, [2..2+vu_count-1]=VU data rows
+    vu_start_idx = 2         # 0-indexed sheet row where VU data begins
+    vu_end_idx   = 2 + vu_count  # exclusive
+
+    WHITE = {"red": 1.0, "green": 1.0, "blue": 1.0}
+    BLACK = {"red": 0.0, "green": 0.0, "blue": 0.0}
+    max_rows = max(len(output_rows) + 50, 150)
+
+    requests = []
+
+    # 1. Clear all data validation in column H
+    requests.append({
+        "setDataValidation": {
+            "range": {
+                "sheetId": sheet_id,
+                "startRowIndex": 0,
+                "endRowIndex": max_rows,
+                "startColumnIndex": H_COL,
+                "endColumnIndex": H_COL + 1,
+            }
+            # No "rule" key = clears validation
+        }
+    })
+
+    # 2. Apply dropdown to Vacant-Unrented data rows only
+    if vu_count > 0:
+        requests.append({
+            "setDataValidation": {
+                "range": {
+                    "sheetId": sheet_id,
+                    "startRowIndex": vu_start_idx,
+                    "endRowIndex": vu_end_idx,
+                    "startColumnIndex": H_COL,
+                    "endColumnIndex": H_COL + 1,
+                },
+                "rule": {
+                    "condition": {
+                        "type": "ONE_OF_LIST",
+                        "values": [{"userEnteredValue": v} for v in NEED_TO_POST_OPTIONS],
+                    },
+                    "showCustomUi": True,
+                    "strict": False,
+                }
+            }
+        })
+
+    # 3. Apply background color to every H cell based on its value
+    for i, row in enumerate(output_rows):
+        val = row[H_COL] if len(row) > H_COL else ""
+        colors = NEED_TO_POST_COLORS.get(val)
+        bg = colors["bg"] if colors else WHITE
+        fg = colors["fg"] if colors else BLACK
+        requests.append({
+            "repeatCell": {
+                "range": {
+                    "sheetId": sheet_id,
+                    "startRowIndex": i,
+                    "endRowIndex": i + 1,
+                    "startColumnIndex": H_COL,
+                    "endColumnIndex": H_COL + 1,
+                },
+                "cell": {
+                    "userEnteredFormat": {
+                        "backgroundColor": bg,
+                        "textFormat": {"foregroundColor": fg},
+                    }
+                },
+                "fields": "userEnteredFormat(backgroundColor,textFormat.foregroundColor)",
+            }
+        })
+
+    worksheet.spreadsheet.batch_update({"requests": requests})
+    print(f"Applied NEED TO POST chips to {vu_count} Vacant-Unrented rows.")
+
+
 # ==========================================================================
 # Main
 # ==========================================================================
@@ -527,6 +625,9 @@ def main():
 
     # Step 5: Write to sheet
     write_to_sheet(worksheet, output_rows)
+
+    # Step 6: Apply NEED TO POST dropdown chips and colors
+    apply_need_to_post_chips(worksheet, sections, output_rows)
 
     print("\nScript complete.")
 
