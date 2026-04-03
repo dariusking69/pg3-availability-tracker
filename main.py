@@ -558,7 +558,21 @@ def apply_need_to_post_chips(worksheet, sections, output_rows):
             }
         })
 
-    # 3. Conditional formatting rules — fire automatically whenever a cell value changes
+    # 3. Days Vacant conditional formatting (column C): >60 dark red, >30 light red
+    #    NEED TO POST conditional formatting (column H): yellow/red/green by value
+    #
+    #    All rules inserted at index=0 in lowest→highest priority order, so the
+    #    last-appended rule ends up at index 0 (highest priority) after the batch.
+    #    Final order: [DV>60, DV>30, NTP_TurnInProgress, NTP_NeedToPost, NTP_Posted]
+
+    DV_COL = 2  # 0-indexed — column C "Days Vacant"
+    dv_range = {
+        "sheetId": sheet_id,
+        "startRowIndex": 1,      # skip header row
+        "endRowIndex": max_rows,
+        "startColumnIndex": DV_COL,
+        "endColumnIndex": DV_COL + 1,
+    }
     cf_range = {
         "sheetId": sheet_id,
         "startRowIndex": vu_start_idx,
@@ -566,7 +580,9 @@ def apply_need_to_post_chips(worksheet, sections, output_rows):
         "startColumnIndex": H_COL,
         "endColumnIndex": H_COL + 1,
     }
-    for option in NEED_TO_POST_OPTIONS:
+
+    # NEED TO POST (lowest priority — added first, pushed down by DV rules)
+    for option in reversed(NEED_TO_POST_OPTIONS):
         colors = NEED_TO_POST_COLORS[option]
         requests.append({
             "addConditionalFormatRule": {
@@ -587,8 +603,48 @@ def apply_need_to_post_chips(worksheet, sections, output_rows):
             }
         })
 
+    # Days Vacant >30: light red (added before >60 so >60 ends up at index 0)
+    requests.append({
+        "addConditionalFormatRule": {
+            "rule": {
+                "ranges": [dv_range],
+                "booleanRule": {
+                    "condition": {
+                        "type": "NUMBER_GREATER",
+                        "values": [{"userEnteredValue": "30"}],
+                    },
+                    "format": {
+                        "backgroundColor": {"red": 0.957, "green": 0.8, "blue": 0.8},
+                    },
+                },
+            },
+            "index": 0,
+        }
+    })
+
+    # Days Vacant >60: dark red — inserted last, lands at index 0 (highest priority)
+    requests.append({
+        "addConditionalFormatRule": {
+            "rule": {
+                "ranges": [dv_range],
+                "booleanRule": {
+                    "condition": {
+                        "type": "NUMBER_GREATER",
+                        "values": [{"userEnteredValue": "60"}],
+                    },
+                    "format": {
+                        "backgroundColor": {"red": 0.8, "green": 0.2, "blue": 0.2},
+                        "textFormat": {"foregroundColor": {"red": 1.0, "green": 1.0, "blue": 1.0}},
+                    },
+                },
+            },
+            "index": 0,
+        }
+    })
+
     worksheet.spreadsheet.batch_update({"requests": requests})
-    print(f"Applied NEED TO POST conditional formatting to {vu_count} Vacant-Unrented rows.")
+    print(f"Applied conditional formatting: Days Vacant (>30 light red, >60 dark red) "
+          f"+ NEED TO POST ({vu_count} VU rows).")
 
 
 # ==========================================================================
