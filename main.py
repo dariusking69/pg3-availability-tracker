@@ -488,7 +488,7 @@ def write_to_sheet(worksheet, output_rows):
 
 
 def apply_need_to_post_chips(worksheet, sections, output_rows):
-    """Apply dropdown + background colors to column H for Vacant-Unrented rows only."""
+    """Apply dropdown + conditional formatting colors to column H for Vacant-Unrented rows only."""
     H_COL = 7  # 0-indexed
     sheet_id = worksheet.id
     vu_count = len(sections["Vacant-Unrented"])
@@ -497,10 +497,29 @@ def apply_need_to_post_chips(worksheet, sections, output_rows):
     vu_start_idx = 2         # 0-indexed sheet row where VU data begins
     vu_end_idx   = 2 + vu_count  # exclusive
 
-    WHITE = {"red": 1.0, "green": 1.0, "blue": 1.0}
-    BLACK = {"red": 0.0, "green": 0.0, "blue": 0.0}
     max_rows = max(len(output_rows) + 50, 150)
 
+    # Step A: delete existing conditional format rules on this sheet to avoid accumulation
+    spreadsheet_meta = worksheet.spreadsheet.client.request(
+        'GET',
+        f'https://sheets.googleapis.com/v4/spreadsheets/{worksheet.spreadsheet.id}',
+        params={'fields': 'sheets(properties/sheetId,conditionalFormats)'}
+    ).json()
+
+    existing_cf_count = 0
+    for sheet in spreadsheet_meta.get('sheets', []):
+        if sheet['properties']['sheetId'] == sheet_id:
+            existing_cf_count = len(sheet.get('conditionalFormats', []))
+            break
+
+    if existing_cf_count > 0:
+        delete_requests = [
+            {"deleteConditionalFormatRule": {"sheetId": sheet_id, "index": idx}}
+            for idx in range(existing_cf_count - 1, -1, -1)
+        ]
+        worksheet.spreadsheet.batch_update({"requests": delete_requests})
+
+    # Step B: validation + new conditional format rules
     requests = []
 
     # 1. Clear all data validation in column H
@@ -539,33 +558,37 @@ def apply_need_to_post_chips(worksheet, sections, output_rows):
             }
         })
 
-    # 3. Apply background color to every H cell based on its value
-    for i, row in enumerate(output_rows):
-        val = row[H_COL] if len(row) > H_COL else ""
-        colors = NEED_TO_POST_COLORS.get(val)
-        bg = colors["bg"] if colors else WHITE
-        fg = colors["fg"] if colors else BLACK
+    # 3. Conditional formatting rules — fire automatically whenever a cell value changes
+    cf_range = {
+        "sheetId": sheet_id,
+        "startRowIndex": vu_start_idx,
+        "endRowIndex": vu_end_idx,
+        "startColumnIndex": H_COL,
+        "endColumnIndex": H_COL + 1,
+    }
+    for option in NEED_TO_POST_OPTIONS:
+        colors = NEED_TO_POST_COLORS[option]
         requests.append({
-            "repeatCell": {
-                "range": {
-                    "sheetId": sheet_id,
-                    "startRowIndex": i,
-                    "endRowIndex": i + 1,
-                    "startColumnIndex": H_COL,
-                    "endColumnIndex": H_COL + 1,
+            "addConditionalFormatRule": {
+                "rule": {
+                    "ranges": [cf_range],
+                    "booleanRule": {
+                        "condition": {
+                            "type": "TEXT_EQ",
+                            "values": [{"userEnteredValue": option}],
+                        },
+                        "format": {
+                            "backgroundColor": colors["bg"],
+                            "textFormat": {"foregroundColor": colors["fg"]},
+                        },
+                    },
                 },
-                "cell": {
-                    "userEnteredFormat": {
-                        "backgroundColor": bg,
-                        "textFormat": {"foregroundColor": fg},
-                    }
-                },
-                "fields": "userEnteredFormat(backgroundColor,textFormat.foregroundColor)",
+                "index": 0,
             }
         })
 
     worksheet.spreadsheet.batch_update({"requests": requests})
-    print(f"Applied NEED TO POST chips to {vu_count} Vacant-Unrented rows.")
+    print(f"Applied NEED TO POST conditional formatting to {vu_count} Vacant-Unrented rows.")
 
 
 # ==========================================================================
